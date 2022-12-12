@@ -7,7 +7,7 @@ EVENTHUB_CONNECTION_STRING='Endpoint=sb://whatever'
 EVENTHUB_NAME="whatever"
 EVENTHUB_NAMESPACE="whatever"
 
-$ eh
+$ go run entrypoints/cli/main.go tail
 event: [{"records": [{ "LogicalServerName": "DummyValue", "SubscriptionId": "00000000-0000-0000-0000-000000000000", "ResourceGroup": "DummyValue", "time": "2022-05-03T09:09:56.5496795Z", ... }]}]
 ```
 
