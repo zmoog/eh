@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"syscall"
 
 	eh "github.com/Azure/azure-event-hubs-go/v3"
 )
@@ -41,7 +42,7 @@ func (a EventHubAdapter) Receive(
 
 	// wait for a signal to quit
 	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt, os.Kill)
+	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 	<-signalChan
 
 	// clean up
