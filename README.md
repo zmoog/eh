@@ -1,6 +1,6 @@
 # eh
 
-## WARNING
+## ⚠️ WARNING ⚠️
 
 This project is on hold, I am working on a Python version at https://github.com/zmoog/eventhubs.
 
