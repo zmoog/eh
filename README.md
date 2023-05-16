@@ -1,5 +1,11 @@
 # eh
 
+## WARNING
+
+This project is on hold, I am working on a Python version at https://github.com/zmoog/eventhubs.
+
+## Usage
+
 **eh** is a command line tool to dump messages with Azure Event Hub.
 
 ```shell
