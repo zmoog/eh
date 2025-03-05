@@ -1,0 +1,173 @@
+/*
+Copyright © 2025 NAME HERE <EMAIL ADDRESS>
+*/
+package cmd
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azeventhubs"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+)
+
+// sendCmd represents the send command
+var sendCmd = &cobra.Command{
+	Use:   "send",
+	Short: "send events to event hub",
+	Long:  `send events to event hub using parallel processing for maximum throughput`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		var reader *bufio.Reader
+
+		switch input := viper.GetString("input"); input {
+		case "-":
+			fmt.Println("input", input)
+			reader = bufio.NewReader(os.Stdin)
+		default:
+			fmt.Println("input", input)
+			file, err := os.Open(input)
+			if err != nil {
+				return fmt.Errorf("failed to open input file: %w", err)
+			}
+			defer file.Close()
+			reader = bufio.NewReader(file)
+		}
+
+		connectionString := viper.GetString("connection-string")
+		eventHubName := viper.GetString("name")
+
+		// defaultAzureCred, err := azidentity.NewDefaultAzureCredential(nil)
+		// if err != nil {
+		// 	return fmt.Errorf("failed to create default azure credential: %w", err)
+		// }
+
+		// Can also use a connection string:
+		//
+		producerClient, err := azeventhubs.NewProducerClientFromConnectionString(connectionString, eventHubName, nil)
+		//
+		// producerClient, err := azeventhubs.NewProducerClient(eventHubNamespace, eventHubName, defaultAzureCred, nil)
+
+		if err != nil {
+			return fmt.Errorf("failed to create producer client: %w", err)
+		}
+
+		defer producerClient.Close(context.TODO())
+
+		newBatchOptions := &azeventhubs.EventDataBatchOptions{
+			// The options allow you to control the size of the batch, as well as the partition it will get sent to.
+
+			// PartitionID can be used to target a specific partition ID.
+			// specific partition ID.
+			//
+			// PartitionID: partitionID,
+
+			// PartitionKey can be used to ensure that messages that have the same key
+			// will go to the same partition without requiring your application to specify
+			// that partition ID.
+			//
+			// PartitionKey: partitionKey,
+
+			//
+			// Or, if you leave both PartitionID and PartitionKey nil, the service will choose a partition.
+		}
+
+		fmt.Println("creating event data batch")
+
+		// Creates an EventDataBatch, which you can use to pack multiple events together, allowing for efficient transfer.
+		batch, err := producerClient.NewEventDataBatch(context.TODO(), newBatchOptions)
+		if err != nil {
+			return fmt.Errorf("failed to create event data batch: %w", err)
+		}
+
+		lineCount := 0
+		for {
+			fmt.Println("reading line", lineCount)
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				return fmt.Errorf("failed to read line: %w", err)
+			}
+			lineCount++
+
+			fmt.Println("read line with length", len(line))
+
+			fmt.Println("adding event data to batch", batch.NumEvents())
+			err = batch.AddEventData(&azeventhubs.EventData{Body: []byte(line)}, nil)
+			if errors.Is(err, azeventhubs.ErrEventDataTooLarge) {
+				fmt.Println("event data too large", err)
+				if batch.NumEvents() == 0 {
+					// This one event is too large for this batch, even on its own. No matter what we do it
+					// will not be sendable at its current size.
+					return fmt.Errorf("failed to create event data batch: %w", err)
+				}
+
+				fmt.Println("sending event data batch", batch.NumEvents())
+				// This batch is full - we can send it and create a new one and continue
+				// packaging and sending events.
+				if err := producerClient.SendEventDataBatch(context.TODO(), batch, nil); err != nil {
+					return fmt.Errorf("failed to send event data batch: %w", err)
+				}
+				fmt.Println("✅ sent event data batch")
+
+				fmt.Println("created new event data batch")
+
+				// create the next batch we'll use for events, ensuring that we use the same options
+				// each time so all the messages go the same target.
+				tmpBatch, err := producerClient.NewEventDataBatch(context.TODO(), newBatchOptions)
+				if err != nil {
+					return fmt.Errorf("failed to create event data batch: %w", err)
+				}
+
+				batch = tmpBatch
+
+				fmt.Println("adding event data to batch", batch.NumEvents())
+				err = batch.AddEventData(&azeventhubs.EventData{Body: []byte(line)}, nil)
+				if err != nil {
+					return fmt.Errorf("failed to add event data to batch: %w", err)
+				}
+			} else {
+				fmt.Println("failed to add event data to batch", err)
+			}
+		}
+
+		fmt.Println("sending event data batch", batch.NumEvents())
+		// if we have any events in the last batch, send it
+		if batch.NumEvents() > 0 {
+			if err := producerClient.SendEventDataBatch(context.TODO(), batch, nil); err != nil {
+				return fmt.Errorf("failed to send event data batch: %w", err)
+			}
+		}
+
+		return nil
+	},
+}
+
+func init() {
+	eventsCmd.AddCommand(sendCmd)
+
+	sendCmd.Flags().StringP("input", "i", "-", "Input JSON file (one JSON object per line)")
+	// sendCmd.Flags().StringP("connection-string", "c", "", "Event Hub connection string")
+	sendCmd.Flags().IntP("workers", "w", 10, "Number of parallel workers")
+
+	sendCmd.MarkFlagRequired("input")
+	sendCmd.MarkFlagRequired("connection-string")
+
+	// Here you will define your flags and configuration settings.
+
+	// Cobra supports Persistent Flags which will work for this command
+	// and all subcommands, e.g.:
+	// sendCmd.PersistentFlags().String("foo", "", "A help for foo")
+
+	// Cobra supports local flags which will only run when this command
+	// is called directly, e.g.:
+	// sendCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+
+	_ = viper.BindPFlag("input", sendCmd.Flags().Lookup("input"))
+}
