@@ -108,7 +108,7 @@ var sendCmd = &cobra.Command{
 					return fmt.Errorf("failed to create event data batch: %w", err)
 				}
 
-				fmt.Println("sending event data batch", batch.NumEvents())
+				fmt.Println("flushing event data batch", batch.NumEvents())
 				// This batch is full - we can send it and create a new one and continue
 				// packaging and sending events.
 				if err := producerClient.SendEventDataBatch(context.TODO(), batch, nil); err != nil {
@@ -116,10 +116,9 @@ var sendCmd = &cobra.Command{
 				}
 				fmt.Println("✅ sent event data batch")
 
-				fmt.Println("created new event data batch")
-
 				// create the next batch we'll use for events, ensuring that we use the same options
 				// each time so all the messages go the same target.
+				fmt.Println("created new event data batch")
 				tmpBatch, err := producerClient.NewEventDataBatch(context.TODO(), newBatchOptions)
 				if err != nil {
 					return fmt.Errorf("failed to create event data batch: %w", err)
@@ -132,7 +131,8 @@ var sendCmd = &cobra.Command{
 				if err != nil {
 					return fmt.Errorf("failed to add event data to batch: %w", err)
 				}
-			} else {
+			} else if err != nil {
+				// This is a different error - we can't add this event to the batch, but we can
 				fmt.Println("failed to add event data to batch", err)
 			}
 		}
