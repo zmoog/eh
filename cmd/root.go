@@ -30,9 +30,9 @@ to quickly create a Cobra application.`,
 		if !viper.IsSet("connection-string") {
 			_ = cmd.MarkFlagRequired("connection-string")
 		}
-		if !viper.IsSet("namespace") {
-			_ = cmd.MarkFlagRequired("namespace")
-		}
+		// if !viper.IsSet("namespace") {
+		// 	_ = cmd.MarkFlagRequired("namespace")
+		// }
 		if !viper.IsSet("name") {
 			_ = cmd.MarkFlagRequired("name")
 		}
@@ -58,7 +58,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.eh)")
 
 	rootCmd.PersistentFlags().StringP("connection-string", "c", "", "The connection string to use for authentication")
-	rootCmd.PersistentFlags().StringP("namespace", "e", "", "The eventhub namespace to use")
+	// rootCmd.PersistentFlags().StringP("namespace", "e", "", "The eventhub namespace to use")
 	rootCmd.PersistentFlags().StringP("name", "n", "", "The eventhub name to use")
 
 	// Cobra also supports local flags, which will only run
@@ -91,6 +91,6 @@ func initConfig() {
 	}
 
 	_ = viper.BindPFlag("connection-string", rootCmd.PersistentFlags().Lookup("connection-string"))
-	_ = viper.BindPFlag("namespace", rootCmd.PersistentFlags().Lookup("namespace"))
+	// _ = viper.BindPFlag("namespace", rootCmd.PersistentFlags().Lookup("namespace"))
 	_ = viper.BindPFlag("name", rootCmd.PersistentFlags().Lookup("name"))
 }

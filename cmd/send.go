@@ -10,10 +10,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azeventhubs"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/time/rate"
+)
+
+var (
+	rateLimit rate.Limit
 )
 
 // sendCmd represents the send command
@@ -21,6 +27,23 @@ var sendCmd = &cobra.Command{
 	Use:   "send",
 	Short: "send events to event hub",
 	Long:  `send events to event hub using parallel processing for maximum throughput`,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if viper.GetString("rate-limit") == "no" {
+			// If the rate limit is not set, we set it to no limit
+			rateLimit = rate.Inf
+			return nil
+		}
+
+		// Parse the rate limit from the command line argument
+		r, err := time.ParseDuration(viper.GetString("rate-limit"))
+		if err != nil {
+			return fmt.Errorf("failed to parse rate limit: %w", err)
+		}
+
+		rateLimit = rate.Every(r)
+
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var reader *bufio.Reader
 
@@ -84,6 +107,9 @@ var sendCmd = &cobra.Command{
 			return fmt.Errorf("failed to create event data batch: %w", err)
 		}
 
+		// Create a rate limiter that allows 1 event per second
+		limiter := rate.NewLimiter(rateLimit, viper.GetInt("rate-burst"))
+
 		lineCount := 0
 		for {
 			fmt.Println("reading line", lineCount)
@@ -97,20 +123,29 @@ var sendCmd = &cobra.Command{
 			lineCount++
 
 			fmt.Println("read line with length", len(line))
-
 			fmt.Println("adding event data to batch", batch.NumEvents())
+
+			// Wait for the rate limiter before adding the event to the batch
+			if err := limiter.Wait(context.TODO()); err != nil {
+				return fmt.Errorf("rate limiter error: %w", err)
+			}
+
 			err = batch.AddEventData(&azeventhubs.EventData{Body: []byte(line)}, nil)
 			if errors.Is(err, azeventhubs.ErrEventDataTooLarge) {
-				fmt.Println("event data too large", err)
 				if batch.NumEvents() == 0 {
 					// This one event is too large for this batch, even on its own. No matter what we do it
 					// will not be sendable at its current size.
 					return fmt.Errorf("failed to create event data batch: %w", err)
 				}
 
-				fmt.Println("flushing event data batch", batch.NumEvents())
 				// This batch is full - we can send it and create a new one and continue
-				// packaging and sending events.
+				fmt.Printf("batch is full, flushing %d events\n", batch.NumEvents())
+
+				// Wait for the rate limiter before sending the batch
+				if err := limiter.Wait(context.TODO()); err != nil {
+					return fmt.Errorf("rate limiter error: %w", err)
+				}
+
 				if err := producerClient.SendEventDataBatch(context.TODO(), batch, nil); err != nil {
 					return fmt.Errorf("failed to send event data batch: %w", err)
 				}
@@ -118,7 +153,8 @@ var sendCmd = &cobra.Command{
 
 				// create the next batch we'll use for events, ensuring that we use the same options
 				// each time so all the messages go the same target.
-				fmt.Println("created new event data batch")
+				fmt.Println("recreating batch")
+
 				tmpBatch, err := producerClient.NewEventDataBatch(context.TODO(), newBatchOptions)
 				if err != nil {
 					return fmt.Errorf("failed to create event data batch: %w", err)
@@ -126,14 +162,20 @@ var sendCmd = &cobra.Command{
 
 				batch = tmpBatch
 
+				// Wait for the rate limiter before adding the event to the batch
+				if err := limiter.Wait(context.TODO()); err != nil {
+					return fmt.Errorf("rate limiter error: %w", err)
+				}
+
 				fmt.Println("adding event data to batch", batch.NumEvents())
 				err = batch.AddEventData(&azeventhubs.EventData{Body: []byte(line)}, nil)
 				if err != nil {
 					return fmt.Errorf("failed to add event data to batch: %w", err)
 				}
+
 			} else if err != nil {
 				// This is a different error - we can't add this event to the batch, but we can
-				fmt.Println("failed to add event data to batch", err)
+				return fmt.Errorf("failed to add event data to batch: %w", err)
 			}
 		}
 
@@ -154,10 +196,13 @@ func init() {
 
 	sendCmd.Flags().StringP("input", "i", "-", "Input JSON file (one JSON object per line)")
 	// sendCmd.Flags().StringP("connection-string", "c", "", "Event Hub connection string")
-	sendCmd.Flags().IntP("workers", "w", 10, "Number of parallel workers")
+	// sendCmd.Flags().IntP("workers", "w", 10, "Number of parallel workers")
+	sendCmd.Flags().StringP("rate-limit", "r", "no", "Rate limit for sending events (e.g. 1s, 100ms, 1h)")
+	sendCmd.Flags().IntP("rate-burst", "b", 1, "Rate burst for sending events (e.g. 1s, 100ms, 1h)")
 
-	sendCmd.MarkFlagRequired("input")
-	sendCmd.MarkFlagRequired("connection-string")
+	_ = viper.BindPFlag("input", sendCmd.Flags().Lookup("input"))
+	_ = viper.BindPFlag("rate-limit", sendCmd.Flags().Lookup("rate-limit"))
+	_ = viper.BindPFlag("rate-burst", sendCmd.Flags().Lookup("rate-burst"))
 
 	// Here you will define your flags and configuration settings.
 
@@ -168,6 +213,4 @@ func init() {
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
 	// sendCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
-
-	_ = viper.BindPFlag("input", sendCmd.Flags().Lookup("input"))
 }
