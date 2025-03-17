@@ -179,12 +179,16 @@ var sendCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Println("sending event data batch", batch.NumEvents())
 		// if we have any events in the last batch, send it
 		if batch.NumEvents() > 0 {
+			fmt.Printf("flushing remaining %d events\n", batch.NumEvents())
 			if err := producerClient.SendEventDataBatch(context.TODO(), batch, nil); err != nil {
-				return fmt.Errorf("failed to send event data batch: %w", err)
+				return fmt.Errorf("failed to flush remaining events: %w", err)
 			}
+		}
+
+		if err := producerClient.Close(context.TODO()); err != nil {
+			return fmt.Errorf("failed to close producer client: %w", err)
 		}
 
 		return nil
